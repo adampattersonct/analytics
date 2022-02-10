@@ -1,0 +1,318 @@
+rm(list=ls())
+
+install.packages("reshape2")
+library(reshape2)
+install.packages("formattable")
+library(formattable)
+install.packages("openxlsx")
+library(openxlsx)
+library(dplyr)
+library(plyr)
+install.packages("mfx")
+library(mfx)
+library(leaps)
+
+setwd("C:/Users/AdamL/OneDrive/Desktop/R")
+
+# Load New Input Data Here :
+# Load Pre Survey here
+d<-read.csv("Excel Literacy_November 24, 2021_18.59.csv")
+# Load Post Survey here
+dat<-read.csv("Excel Literacy Post Survey_December 22, 2021_19.49.csv")
+# Load Covariates here 
+data1<-read.xlsx("ECON_Harmon_Request12292021v2.xlsx")
+
+
+data1<-data1[-320,]
+summary(as.numeric(data1$CUM_GPA_FS21))
+hist(as.numeric(data1$CUM_GPA_FS21))
+plot(density(na.omit(data1$CUM_GPA_FS21)))
+
+
+## Data Management of Pre-Survey before merging 
+
+# Question 1 dummy
+d$q5<-tolower(d$Q5)
+d$q1dummy<-0
+d$q1dummy[agrep("austin slater",d$q5,max.distance =2)]<-1
+
+# Question 2 dummy
+d$Q7<-as.numeric(d$Q7)
+d$q2dummy<-0
+d$q2dummy[which(d$Q7 == 903)]<-1
+
+# Question 3 dummy
+d$Q9<-as.numeric(d$Q9)
+d$q3dummy<-0
+d$q3dummy[which(d$Q9 > 8.7 & d$Q9 < 8.8)]<-1
+
+# Question 4 HR median dummy
+d$Q11<-as.numeric(d$Q11)
+d$q4dummy<-0
+d$q4dummy[which(d$Q11 == 8)]<-1
+
+# Question 5 sum of HR dummy 
+d$Q15<-as.numeric(d$Q15)
+d$q5dummy<-0
+d$q5dummy[which(d$Q15 == 0)]<-1
+
+
+# Question 1 Confidence
+conf_one<-mean(as.numeric(d$Q6),na.rm = TRUE)
+
+# Question 2 Confidence
+conf_two<-mean(as.numeric(d$Q8),na.rm = TRUE)
+
+# Question 3 Confidence
+conf_three.mean<-mean(as.numeric(d$Q10),na.rm = TRUE)
+
+# Question 4 hr median Confidence
+conf_four.mean<-mean(as.numeric(d$Q12),na.rm = TRUE)
+
+# Question 5 sum of dummy Confidence
+conf_five.mean<-mean(as.numeric(d$Q17),na.rm = TRUE)
+
+
+pre_confidence_total<-as.numeric(d$Q6)+as.numeric(d$Q8)+as.numeric(d$Q10)+as.numeric(d$Q12)+as.numeric(d$Q17)
+
+### Merge data and subset
+# merge  data based on students that completed survey 
+merge<-merge(d,dat,"RecipientEmail")
+
+# merge covariates data 
+merge1<-merge(merge,data1,"RecipientEmail")
+
+# Subset students that consent for research and completed the survey
+m<-merge1[(merge1$Q1.x==1 & merge1$Finished.x ==1 & merge1$Finished.y =="True"),]
+
+m<-read.csv("aggregateData_01_19_2022.csv")
+m<-m[,-1]
+
+
+
+## Data Management from Post-Survey
+# Q1 confidence numerical creation
+m$q1.post_conf<-1
+m[m$Q6.y=="unsure",ncol(m)]<-2
+m[m$Q6.y=="pretty confident" ,ncol(m)]<-3
+m[m$Q6.y=="very confident" ,ncol(m)]<-4
+conf_one.post<-mean(m$q1.post_conf)
+
+
+# Q2 confidence numerical creation 
+m$q2.post_conf<-1
+m[m$Q8.y=="unsure",ncol(m)]<-2
+m[m$Q8.y=="pretty confident" ,ncol(m)]<-3
+m[m$Q8.y=="very confident" ,ncol(m)]<-4
+conf_two<-mean(m$q2.post_conf)
+
+# Self reported proficiency in Excel 
+difference<-as.numeric(m$Q24.y)-as.numeric(m$Q24.x)
+mean(difference, na.rm = TRUE)
+
+## Make ggplot2 density of difference in reported self reported profiency 
+hist(difference)
+
+
+#  Data Management on Covariates
+
+## Previous Economics Dummy for Students with High School Economics class
+revalue(as.factor(m$Q34),c("Yes"=1,"No"=0))
+colnames(m)[which(colnames(m)=="Q34")]<-"HighSchoolEcon"
+
+colnames(m)
+colnames(m)[which(colnames(m)=="CalcAge")]<-"Age"
+colnames(m)[which(colnames(m)=="SEM_GPA_FS21")]<-"SemesterGPA"
+colnames(m)[which(colnames(m)=="CUM_GPA_FS21")]<-"GPA"
+
+# Gender Dummy (Binary. These days, we may want to acknowledge this binary nature as a limitation of the study)
+revalue(as.factor(m$Gender), c("Male" =1, "Female" = 0))
+
+m$enrolled_dept
+# Create student enrolled dummy department categories 
+# 0= other (our reference group), 1= Computer Science
+m$computerSci<-0
+m[which(m$enrolled_dept=="Computer Science & Engineering"),ncol(m)]<-1
+
+## econ variable uses all other majors as reference. I was curious to see computer science results
+m$econ<-0
+m[which(m$enrolled_dept=="Economics"),ncol(m)]<-1
+
+# Business School Dummy 
+#1 = Students enrolled in the Business School, 0= all other students 
+m$bSchool<-0
+m[which(m$enrolled_school=="Business"),ncol(m)]<-1
+
+# Ethnicity variable
+m$ethnicity<-substr(m$IPEDS_Ethnicity,1,1)
+# Print out of what numeric value corresponds with each ethnicity 
+summary(as.factor(m$IPEDS_Ethnicity))
+## change reference group to white
+m$IPEDS_Ethnicity[which(m$IPEDS_Ethnicity=="1.NRA")]<-"7.NRA"
+m$IPEDS_Ethnicity[which(m$IPEDS_Ethnicity=="7.White")]<-"1.White"
+summary(as.factor(m$IPEDS_Ethnicity))
+
+# Data Management for Post-Survey Results
+
+# Number of correct answers for question 1
+first_correct<-nrow(m[m$Q5.y==418,]) /nrow(dat)
+first_confidence<-mean(m$q1.post_conf)
+
+# Number of correct answers for question 2
+second_correct<-nrow(m[(m$Q7.y > .239 & m$Q7.y < .25),]) /nrow(dat)  
+second_confidence<-mean(m$q2.post_conf)
+
+# Create dummy variable for q1 and q2 correct  #
+m$q1dummy.post<-0
+m[m$Q5.y==418,ncol(m)]<-1
+
+m$q2dummy.post<-0
+m[(m$Q7.y > .239 & m$Q7.y < .25),ncol(m)]<-1
+
+# See which students scored both questions right. Looking at the correct %, I suspect high correlation. Definitely endogenous like much of school 
+both_correct<-m[(m$q1dummy ==1 & m$q2dummy ==1),]
+nrow(both_correct)/67 # About half of the students * WHy not use   /nrow(m)
+
+# q35 is economics class dummy 
+# q24 is reported self confidence in excel. Create average of reported confidence in both pre and post survey evaluations 
+m$self_report_excel<-(as.numeric(m$Q24.x)+as.numeric(m$Q24.y))/2
+
+# Create variable for total number of correct questions answered
+m$dummySum<-m$q1dummy.post+m$q2dummy.post+m$q1dummy+m$q2dummy+m$q3dummy+m$q4dummy+m$q5dummy
+
+# Create mean of confidence answers as an additional covariate for OLS
+
+m$confidence_sum<-m$q1.post_conf+m$q2.post_conf+as.numeric(m$Q6.x)+as.numeric(m$Q10)+as.numeric(m$Q17)+as.numeric(m$Q8.x)+as.numeric(m$Q12)
+m$confidence_mean<-m$confidence_sum/7
+  
+
+
+
+
+############################################## 
+# Start of Data Analysis                     #
+##############################################
+
+######### OLS of total number of questions correct on selected covariates
+ols<-lm(m$dummySum~m$IPEDS_Ethnicity+m$Gender+m$enrolled_dept+m$GPA)
+summary(ols)
+
+ols1<-lm(m$dummySum~m$IPEDS_Ethnicity+m$Gender+m$enrolled_dept+m$Age+m$self_report_excel+m$GPA)
+summary(ols1)
+
+# Add mean confidence answer as covariate. This is usually significant in other models
+ols2<-lm(m$dummySum~m$IPEDS_Ethnicity+m$Gender+m$enrolled_dept+m$Age+m$self_report_excel+m$GPA)
+summary(ols2)
+
+??stargazer
+
+######### Logit models of each correct dummy conditioned on selected covariates 
+logit1<-glm(as.numeric(q1dummy)~as.factor(Q6.x)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit1)
+logitmfx(as.numeric(q1dummy)~as.factor(Q6.x)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+
+# Dummy 2
+logit2<-glm(as.numeric(q2dummy)~as.factor(as.numeric(Q8.x))+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit2)
+logitmfx(as.numeric(q2dummy)~as.factor(Q8.x)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+# Dummy 3
+logit3<-glm(as.numeric(q3dummy)~as.factor(as.numeric(Q10))+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit3)
+logitmfx(as.numeric(q3dummy)~as.factor(Q10)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+m$Q10
+# Dummy 4
+logit4<-glm(as.numeric(q4dummy)~as.factor(Q12)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit4)
+logitmfx(as.numeric(q4dummy)~as.factor(Q12)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+# Dummy 5
+logit5<-glm(as.numeric(q5dummy)~as.factor(Q17)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit5)
+logitmfx(as.numeric(q5dummy)~as.factor(Q17)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+# Post Excel logit models 
+logit1a<-glm(as.numeric(q1dummy.post)~as.factor(q1.post_conf)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit1a)
+logitmfx(as.numeric(q1dummy)~as.factor(Q6.x)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+
+# Dummy 2
+logit2<-glm(as.numeric(q2dummy)~as.factor(Q8.x)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m, family="binomial")
+summary(logit2)
+logitmfx(as.numeric(q2dummy)~as.factor(Q8.x)+HighSchoolEcon+GPA+IPEDS_Ethnicity+Gender+enrolled_dept+Age+self_report_excel, data=m)
+
+
+## LPM of dummy for 1st question as dependent variable 
+mod1<-lm(as.numeric(q1dummy)~q2dummy+HighSchoolEcon+econ+bSchool+computerSci+as.factor(ethnicity)+self_report_excel+q1.post_conf+q2.post_conf+GPA+Gender+Age, data=m)
+summary(mod1)
+mod1<-lm(as.numeric(q1dummy)~q2dummy+HighSchoolEcon+econ+bSchool+computerSci+self_report_excel+q1.post_conf+q2.post_conf+GPA+Gender+Age, data=m)
+
+
+sort(mod1$fitted.values)
+# We cannot use LPM model as fitted values fall outside the bounds of reality ##########
+
+##EDA
+plot(density(m$dummySum))
+
+plot(density(m$q1dummy))
+# Double gaussian distribution, I would use probit over logit model
+mod1<-glm(as.numeric(q1dummy)~q2dummy+HighSchoolEcon+econ+bSchool+computerSci+as.factor(ethnicity)+self_report_excel+q1.post_conf+q2.post_conf+GPA+Gender+Age, data=m, family="binomial"(link="probit"))
+probitmfx(as.numeric(q1dummy)~q2dummy+HighSchoolEcon+econ+bSchool+computerSci+as.factor(ethnicity)+self_report_excel+q1.post_conf+q2.post_conf+GPA+Gender+Age, data=m)
+
+
+
+### Explore mst efficient number of predictors
+library(randomForest)
+## Interact, square for random forest algo
+subset<-m[,c(81,87,99,101,107:109,113,114,116)]
+colnames(m)
+interaction_data<-model.matrix(~.^2,data=subset)
+interaction_data<-as.data.frame(interaction_data)
+
+# Create model
+regfit.full<- regsubsets(dummySum~.,interaction_data, nvmax=93, method = "forward")
+summary_full<-summary(regfit.full)
+plot(summary_full$bic,xlab="Number of Regressors", ylab="BIC",type="l", main="Forward Stepwise Selection")
+a1<-which.min(summary_full$bic)
+points(a1,summary_full$bic[a1], col="red", cex=2, pch=20)
+
+# See what coef belong to min BIC
+sort(coef(regfit.full,which.min(summary_full$bic)))
+summary_full$rss
+
+
+## Exmplore subset data capabilities with RF
+library(randomForest)
+interaction_data$`(Intercept)`<-NULL
+interaction_data
+rf<-randomForest(dummySum~ .,data=interaction_data,ntree=100,mtry=12,nodesize=10,na.action=na.omit, importance=TRUE)
+# Compare to old model with subsset data
+mod1<-glm(q1dummy~bSchool:ethnicity7+q4dummy:Age+Age:self_report_excel+Age:econ+q4dummy:ethnicity7,data=interaction_data,family="binomial"(link="probit"))
+probitmfx(q1dummy~bSchool:ethnicity7+q4dummy:Age+Age:self_report_excel+Age:econ+q4dummy:ethnicity7,data=interaction_data)
+
+
+# Regression of post answers conditional on post survey answers AND pre survey correct answers 
+
+# q3, q4, q5 are pre excel survey while q1 and q2 and post excel survey 
+mod3<-lm(q1dummy~q2dummy+Q34+self_report_excel+q1_confidence+q2_confidence+q3dummy+q4dummy+q5dummy, data=m)
+summary(mod3)
+
+# q3, q4, q5 are pre excel survey while q1 and q2 and post excel survey 
+mod4<-lm(q2dummy~q1dummy+Q34+self_report_excel+q1_confidence+q2_confidence+q3dummy+q4dummy+q5dummy, data=m)
+summary(mod4)
+
+
+# Running the same models but with confidence interacted with correct answer dummy 
+mod3a<-lm(q1dummy~q2dummy+Q34+self_report_excel+q1_confidence+q2_confidence+q3dummy+q4dummy+q5dummy+as.factor(Q10)+as.factor(Q12)+as.factor(Q17), data=m)
+summary(mod3a)
+
+mod4a<-lm(q2dummy~q1dummy+Q34+self_report_excel+q1_confidence+q2_confidence+q3dummy+q4dummy+q5dummy+as.factor(Q10)+as.factor(Q12)+as.factor(Q17), data=m)
+summary(mod4a)
+
+
+# Model using Excel survey reported confidence from post survey rather than average of pre and post
+mod3aa<-lm(q1dummy~q2dummy+Q34+Q24.y+q1_confidence+q2_confidence+q3dummy+q4dummy+q5dummy+as.factor(Q10)+as.factor(Q12)+as.factor(Q17), data=m)
+summary(mod3aa)
