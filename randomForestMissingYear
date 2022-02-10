@@ -1,0 +1,76 @@
+#########################################################################################################
+### This script serves to interpolate the missing Spud and Completion years amongst well observations ###
+#########################################################################################################
+
+# Clear Global Environment 
+rm(list=ls())
+set.seed(1)
+#### Load relevant packages
+library(randomForest)
+
+# Set WD and load data
+setwd("M:/project/adam/paper 2/input/wells")
+data<-read.csv("Horizontal_Wells.csv", header = TRUE)
+data.a<-data
+
+# Subset data into columns with 99 percent or more of non-NA values. Random Forest does not like NA values
+data<-data[, which(colMeans(!is.na(data)) > .99)]
+
+# Create Spud year variable #
+data$Spud_Year<-substr(data$Spud.Date,1,4)
+data$Spud.Date<-NULL
+data$Spud_Year<-as.numeric(data$Spud_Year)
+
+# Create Test Set
+spud_na<-data[which(is.na(data$Spud_Year)),]
+
+# Create Training Set
+spud<-data[-which(is.na(data$Spud_Year)),]
+
+# Train the Random Forest algorithm with Spud Year wells to deploy on missing Spud Years
+rf<-randomForest(Spud_Year~.,data=spud,
+                 ntree=100,mtry=12,nodesize=10,na.action=na.omit, importance=TRUE)
+
+## Squaring the mean residual squared error results in too high of an error to use this method. I will use KNN imputation for interpolation of Spud year
+rf
+
+# Deploy trained algorithm on unidentified years 
+spud_predict<-predict(rf,spud_na)
+complete_predict<-predict(rf1,complete_na)
+
+spud$Spud_Year<-spud_predict
+complete$Complete_Year<-complete_predict
+
+summary(spud_predict)
+summary(complete_predict)
+summary(spud$Spud_Year)
+
+data.a[which(is.na(data$Spud_Year))]
+
+data11<-data[1:10000,]
+
+# Alternative inputation method ; compare with above. 
+### Train Model using K nearnest neighbors aproach with Knn Impute algorithm ##
+na_model<-preProcess(data, method = c("knnImpute"),na.action = na.pass)
+### Predict imputeted values given our dataset 
+na_inpute<-predict(na_model,data)
+
+### Create descriptive statistic variable to unstandardize the imputed value ###
+mean<- mean(data1$Spud_Year, na.rm = TRUE)
+sd<- sd(data1$Spud_Year, na.rm = TRUE)
+data1$Spud_Year1<-round((na_inpute$Spud_Year*sd) + mean,0)
+
+mean<- mean(data1$Complete_Year, na.rm = TRUE)
+sd<- sd(data1$Spud_Year, na.rm = TRUE)
+data1$Spud_Year1<-round((na_inpute$Spud_Year*sd) + mean,0)
+
+# Check to see if imputation was correct (compare original year to imputed year for non Na's) #
+data1$Spud_Year-data1$Spud_Year1
+
+# Perform data management to have original dataset fit into other code 
+data<-cbind(data,data1$Spud_Year1)
+data$Spud_Year<-NULL
+colnames(data)[145]<-"Spud_Year"
+
+
+write.csv(data,"Production__Table11.csv")
