@@ -1,0 +1,103 @@
+rm(list=ls())
+
+setwd("~/Dropbox/chemical_data/")
+library(stringr)
+library(zoo)
+
+chem<-read.table("chemical.txt", sep=",", fill=TRUE, header=TRUE)
+cas<-read.table("chem_cas.txt", sep=",", fill=TRUE, header=TRUE)
+
+# Load threshold values retrieved from https://www.dir.ca.gov/title8/ac1.pdf, more specifically https://www.osha.gov/chemical-hazards. 
+# OSHA gives Cali their own chemical permissable exposure limits. I can see hesitancy to use OSHA given we are modeling non-occupational pesticide use
+# but could be a very conservative exposure cutoff estimate. 
+setwd("~/Dropbox/Adam_assistance")
+cutoff1<-read.csv("TABLE AC-1 PERMISSIBLE EXPOSURE LIMITS FOR CHEMICAL CONTAMINANTS.csv",na.strings=c("","NA"))
+
+#Take out all empty spaces from multi page pdf conversion
+empty<-which(is.na(cutoff1$NAME))
+cut<-cutoff1[-empty,]
+headlines<-which(cut$CARN=="Number")
+cu<-cut[-headlines,]
+title<-which(cu$NAME=="TABLE AC-1 ")
+cutoff<-cu[-title,]
+title1<-which(cutoff$NAME=="TABLE AC-1")
+cutoff<-cutoff[-title1,]
+title2<-which(cutoff$NAME=="see")
+cutoff<-cutoff[-title2,]
+#write.csv(cutoff,"oshaThreshold.csv")
+
+# Check # of NA, substantial amount 
+sum(is.na(cutoff$CARN))
+
+#Data Management . turn NA values into last observation. 
+cutoff$CARN[which(cutoff$CARN=="" )]<-NA
+id<-na.locf(cutoff$CARN)
+cutoff$CARN<-id
+
+# Bring over chemical names for reference amongst matching CARN
+match(cas$chem_code,chem$chem_code)
+chem$chemname[match(cas$chem_code,chem$chem_code)]
+cas$chemname<-chem$chemname[match(cas$chem_code,chem$chem_code)] 
+
+# Modify California Abstract Registry Number 
+cas$CARN<-gsub("-","",cas$casnum)
+cas$CARN<-str_trim(cas$CARN)
+
+
+# Aggregate cutoff threshold by ID. 
+aggregate_values1<-aggregate(as.numeric(cutoff$MG.M3_pel),list(cutoff$CARN),mean)
+aggregate_values<-aggregate(as.numeric(cutoff$MG.M3_pel),list(cutoff$CARN),sum)
+
+#Check to make sure mean function did not omit na. Looks good as sum mapping and mean values are both NAs 
+check<-cbind(aggregate_values,aggregate_values1)
+
+
+#exploring results
+x2<-which(aggregate_values1$x == aggregate_values$x)
+x2<-which(aggregate_values1$x != aggregate_values$x)
+data<-aggregate_values[x2,]
+check[x2,]
+
+
+# Pel is permissible exposure limit, as defined by section 5155(b) and (c)(1). The maximum permitted 8-hour time-weighted average concentration of an airborne contaminant
+# Stel is short term exposure limit, as defined by  sections 5155(b) and (c)(2). 
+# https://www.dir.ca.gov/title8/5155.html
+merged<-merge(cas,cutoff, by="CARN")
+
+## this soulution creates a more compact dataset than the merged option above
+match(cas$CARN,cutoff$CARN)
+cutoff$MG.M3_pel[match(cas$CARN,cutoff$CARN)]
+cas$mg.m_pel<-cutoff$MG.M3_pel[match(cas$CARN,cutoff$CARN)]
+
+# Compare with aggregate created values to make sure   #### Run here
+match(cas$CARN,aggregate_values1$Group.1)
+aggregate_values1$x[match(cas$CARN,aggregate_values1$Group.1)]
+cas$mg.m3_pel<-aggregate_values1$x[match(cas$CARN,aggregate_values1$Group.1)]
+
+# Subset na index, and remove from dataset
+len<-which(is.na(cas$mg.m3_pel))
+len1<-cas[-len,]
+
+# Write created dataset 
+write.csv(len1,"oshaThreshold.csv")
+
+# Now, lets look at original values of chemicals to determine which method to use
+# Nickel has 3 values. 2 are between insoluble and soluble. We are looking for soluble in pesticid
+# It appears the mean did a better job. Again, if we wanted to be conservative in our estimates/paper... we could use the min?
+# Turpentine was mapped wrong using the last value before NA method. Uranium has no ID.
+## I should find out what chemicals are used in pesticides to see if a few variables like welding fumes, turpentine and mismapped in aggregate
+
+
+# I need to get that web scraping file up and running and then perform better data management 
+
+# appears to be 5 liters. Not sure how to handle this unit comparative to others in creating a column?
+cas[309,]
+
+
+# Mg/M is Milligrams of substance per cubic meter of air at 25°C and 760mm Hg pressure. Mg/m_pel is 8 hour air cutoff
+# Subset to only use mg/M. I kept matched name in dataset so that we can verify all duplicates and avg by group if necessary. 
+# Looking through the data, I can see that most duplicate names have only 1 row of mg/m values. That is just from quick visual check 
+data<-merged[,c(1,2,4,7:9)]
+head(data)
+
+write.csv(len1,"chemicalCutoffOSHA.csv")
